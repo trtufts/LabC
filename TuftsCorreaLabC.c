@@ -4,6 +4,9 @@
 #include <string.h>
 #include <assert.h>
 
+int iMem[] = (int *) malloc(2048*8*sizeof(int)); //2048 bytes with 8 integers per byte
+int dMem[] = (int *) malloc(2048*8*sizeof(int)); //Both memory arrays are the same size
+
 IF(int c){
 //c cycles
 }
@@ -27,8 +30,8 @@ WB(){
 //Not done
 parser(String instruction){
 	int i;
-    char delimiters[]=",";  // Define delimiters for the strtok functions
-    char ** instructionFields; //Define the resulting instruction fields
+	char delimiters[]=", ";  // Define delimiters for the strtok functions
+	char ** instructionFields; //Define the resulting instruction fields
 	char format;
 
 	//parse first field to find opcode
@@ -48,32 +51,37 @@ parser(String instruction){
 	
 	}
 
-    printf("inputString[]=%s\n", inputString);
-    instructionFields[0] = strtok(inputString, delimiters);
-    printf("inputString[]=%s\n", inputString);
-    instructionFields[1] = strtok(NULL, delimiters);
-    printf("inputString[]=%s\n", inputString);
-    instructionFields[2] = strtok(NULL, delimiters);
-    printf("inputString[]=%s\n", inputString);
-    printf("%s \n%s \n%s \n", instructionFields[0], instructionFields[1], instructionFields[2]);
+	printf("inputString[]=%s\n", inputString);
+	instructionFields[0] = strtok(inputString, delimiters);
+	printf("inputString[]=%s\n", inputString);
+	instructionFields[1] = strtok(NULL, delimiters);
+	printf("inputString[]=%s\n", inputString);
+	instructionFields[2] = strtok(NULL, delimiters);
+	printf("inputString[]=%s\n", inputString);
+	printf("%s \n%s \n%s \n", instructionFields[0], instructionFields[1], instructionFields[2]);
 }
 
-//Not done
-progScanner(String inputFile){
-    char *traceEntry1;
-    FILE *ifp;
+progScanner(string inputFile){
+	char *traceEntry;
+	FILE *ifp;
+	string fullInput = "./" + inputFile;
 
-    traceEntry1 = malloc(200*sizeof(char));
-    ifp = fopen("./program.txt", "r");
+	traceEntry = malloc(200*sizeof(char));
+	
+	ifp = fopen(fullInput, "r");
 
-    while (fgets(traceEntry1, 75, ifp)) 
-      printf("String input is %s \n", traceEntry1);
-    fclose(ifp);
+	while (fgets(traceEntry, 75, ifp)) 
+		parser(traceEntry);
+	fclose(ifp);
 }
 
-main(){
+main(int argc, char* argv[]){
 	//Parse input to get file name, Mem time c, Multiply time m, EX op time n
+	string inputFile = argv[argc-4];
+	int c = atoi(argv[argc-3]);
+	int m = atoi(argv[argc-2]);
+	int n = atoi(argv[argc-1)];
+	
 	progScanner(inputFile);
 	
-
 }
