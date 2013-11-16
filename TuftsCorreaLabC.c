@@ -4,8 +4,12 @@
 #include <string.h>
 #include <assert.h>
 
-int iMem[] = (int *) malloc(2048*8*sizeof(int)); //2048 bytes with 8 integers per byte
-int dMem[] = (int *) malloc(2048*8*sizeof(int)); //Both memory arrays are the same size
+int iMem[] = (int *) malloc(2048*sizeof(int)); //2048 Bytes 
+int dMem[] = (int *) malloc(2048*sizeof(int)); //Both memory arrays are the same size
+
+struct inst{
+	int op, s1, s2, d, im;
+}
 
 IF(int c){
 //c cycles
@@ -27,8 +31,8 @@ WB(){
 //One cycle
 }
 
-//Not done
-parser(String instruction){
+//Needs to pick R or I type, and parse stuff into numbers for iMem
+struct inst parser(String instruction){
 	int i;
 	char delimiters[]=", ";  // Define delimiters for the strtok functions
 	char ** instructionFields; //Define the resulting instruction fields
@@ -61,7 +65,8 @@ parser(String instruction){
 	printf("%s \n%s \n%s \n", instructionFields[0], instructionFields[1], instructionFields[2]);
 }
 
-progScanner(string inputFile){
+//almost done, needs fgets tuning
+char * progScanner(string inputFile){
 	char *traceEntry;
 	FILE *ifp;
 	string fullInput = "./" + inputFile;
@@ -70,12 +75,28 @@ progScanner(string inputFile){
 	
 	ifp = fopen(fullInput, "r");
 
-	while (fgets(traceEntry, 75, ifp)) 
+	while (fgets(traceEntry, 100, ifp)) 
 		parser(traceEntry);
 	fclose(ifp);
 }
 
 main(int argc, char* argv[]){
+	//instantiate the dMem to all 0's, 2048 bytes to set
+	
+	//instantiate the registers
+	int reg[] = (int *) malloc(32*sizeof(int));
+	reg[0] = 0;
+
+	//instantiates the utilization data collection variables
+	int totalCycles = 0;
+	int IFcycles = 0;
+	int IDcycles = 0;
+	int EXcycles = 0;
+	int MEMcycles = 0;
+	int WBcycles = 0;
+	
+	
+	
 	//Parse input to get file name, Mem time c, Multiply time m, EX op time n
 	string inputFile = argv[argc-4];
 	int c = atoi(argv[argc-3]);
