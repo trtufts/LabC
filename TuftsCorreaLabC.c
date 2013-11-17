@@ -9,9 +9,9 @@ enum inst {ADD,ADDI,SUB,MULT,BEQ,LW,SW,HALT};
 //Consider changinng to typedef to remove struct code clutter
 struct inst{
 	int op;
+	int d;
 	int s1;
 	int s2;
-	int d;
 	int im;
 };
 
@@ -28,6 +28,7 @@ struct latch IF_ID;
 struct latch ID_EX;
 struct latch EX_MEM;
 struct latch MEM_WB;
+struct inst tempInst;
 int totalCycles;
 int IFcycles;
 int IDcycles;
@@ -47,7 +48,7 @@ int halt;	//1 when the program should be halting, 0 otherwise
 int simMode;
 
 void IF(){
-	if(IF_ID.pipedInst == 7){	//If halt has passed through here, it just auto returns
+	if(IF_ID.pipedInst == 7){							//If halt has passed through here, it just auto returns
 		return;
 	}
 	if((IF_ID.validItem == 0)&&(branchPending == 0)){	//If the latch is ready and there is no branch pending, IF acts
@@ -63,18 +64,79 @@ void IF(){
 		else{
 			IFdelay -= 1;								//Counts down the delay for the IF stage
 			IFcycles ++;								//This is a useful cycle for the IF stage
-			assert(IFdelay > -1); //Catch if this decreases too much
+			assert(IFdelay > -1); 						//Catch if this decreases too much
 		}
 		
 	}
 }
 
-void ID(){
-//One cycle
-
-		if(IF_ID.pipedInst.op == 4){				//If it reads a branch, mark branch pending
-			branchPending = 1;
+int regCheck(int sReg, int regType){					//sReg is the register number, regType = 1 is s1, regType = 2 is s2
+	assert((regType != 1)&&(regType != 2));				//if the regType is not 1 or 2 this function is being used wrong
+	if(regType = 1){
+		if((EX_MEM.validItem == 1)&&(EX_MEM.s1 == sReg)){	//This only checks against registers that are in valid latches
+			return 1;
 		}
+		if((MEM_WB.validItem == 1)&&(MEM_WB.s1 == sReg)){
+			return 1;
+		}
+	}
+	if(regType = 2){
+		if((EX_MEM.validItem == 1)&&(EX_MEM.s2 == sReg)){	//This only checks against registers that are in valid latches
+			return 1;
+		}
+		if((MEM_WB.validItem == 1)&&(MEM_WB.s2 == sReg)){
+			return 1;
+		}
+	}
+	
+	return 0;											//If it never catches, the register is fine
+}
+
+void ID(){
+	if(ID_EX.pipedInst == 7){							//If halt has passed through here, it just auto returns
+		return;
+	}
+	if((IF_ID.validItem == 1)&&(ID_EX.validItem == 0)){	//If both latches are ready go to the instruction switch statements
+		if(regCheck(IF_ID.pipedInst.s1, 1) == 1) return;		//Every instruction needs to check the first source register, s1
+		switch(IF_ID.pipedInst.op){						//Instruction cases are grouped for efficiency because certain instructions have the same actions
+			case 0:										//add
+			case 2:										//sub
+				if(regCheck(IF_ID.pipedInst.s2, 2) == 1) return;	//Checks s2 for add and sub, if they pass they have the same ID step
+				
+				break;
+			case 3:										//mul			
+				if(regCheck(IF_ID.pipedInst.s2, 2) == 1) return;	//Checks s2 for mul, it has a different ID step than add and sub
+				break;
+			case 4:										//beq
+				if(regCheck(IF_ID.pipedInst.s1, 1) == 1) return;	//Checks s2 of beq, it has a different ID step than the mul, add and sub
+				branchPending = 1;						//If it reads a branch, mark branch pending
+				break;
+			case 1:										//addi
+			case 5:										//lw
+			
+				break;
+			case 6:										//sw
+				if(regCheck(IF_ID.pipedInst.s1, 1) == 1) return;	//Checks s2 of sw, it relies on s2 while addi and lw do not
+				
+				break;
+			case 7:										//halt
+				ID_EX.pipedInst = IF_ID.pipedInst;		//Push the halt instruction down the pipe
+				ID_EX.instPC = IF_ID.instPC;			//Push the pc for good measure
+				ID_EX.validItem = 1;					//Mark the latch as ready for consumption so the halt propagates
+				nextEXdelay = 1;						//Set the EXdelay to be 1 for fast propagation
+				return;
+				
+			default:
+				printf("Op Code not recognized: ID Stage");
+				assert(0 == 1);							//If it doesn't decode one of the 7 possibilities there is an error, should be caught by the parser, but this is a backup
+				return;
+		}
+		
+		IF_ID.validItem = 0;
+		IF_ID.pipedInst = tempInst;
+		IF_ID.instPC = 0;
+		IDcycles ++;
+	}
 }
 
 void EX(int n, int m){
@@ -159,7 +221,7 @@ main(int argc, char* argv[]){
 	//instantiates general function variables
 	pc = 0;
 	halt = 1;
-	struct inst tempInst = {0, 0, 0, 0, 0};
+	tempInst = {0, 0, 0, 0, 0};
 	IF_ID = {tempInst, 0, 0};
 	ID_EX = {tempInst, 0, 0};
 	EX_MEM = {tempInst, 0, 0};
@@ -195,6 +257,9 @@ main(int argc, char* argv[]){
 		assert(pc < 512); //Only 512 instructions fit in the memory
 	} while(tempInst.op != 7);
 	fclose(inputFile);
+	
+	//Reset tempInst so it can be used to clear latches
+	tempInst = {0, 0, 0, 0, 0};
 	
 	pc = 0; //reset pc to 0
 	
