@@ -3,7 +3,7 @@ ECE 353 Lab C
 MIPS Pipelined Processor Simulator in C
 
 Authors:
-Timothy Tufts
+Timothy Tufts,
 Gabriela Correa
 
 Assignment Description:
