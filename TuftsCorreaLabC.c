@@ -67,7 +67,7 @@ void IF(){
 			
 			pc ++;										//Increment the pc for the next instruction (note we go by one because iMem is indexed by instruction not bits)
 			IFcycles ++;								//This is a useful cycle for the IF stage
-			IFdelay == c;								//Resets delay for the next instruction
+			IFdelay = c;								//Resets delay for the next instruction
 		}
 		else{
 			IFdelay -= 1;								//Counts down the delay for the IF stage
@@ -96,7 +96,7 @@ int regCheck(int sReg){								//sReg is the register number that is being check
 				break;
 			default:
 				printf("Op Code not recognized: EX_MEM Latch");
-				assert(0 == 1);						//This should never be reached
+				exit();						//This should never be reached
 		}
 	}
 	if(MEM_WB.validItem == 1){
@@ -116,7 +116,7 @@ int regCheck(int sReg){								//sReg is the register number that is being check
 				break;
 			default:
 				printf("Op Code not recognized: MEM_WB Latch");
-				assert(0 == 1);						//This should never be reached
+				exit();						//This should never be reached
 		}
 	}
 	return 0;										//If it never catches, the register is fine
@@ -124,11 +124,12 @@ int regCheck(int sReg){								//sReg is the register number that is being check
 
 
 void IDpush(){											//These 5 lines were repeated enough to warrant a new function to reduce code
+	ID_EX = IF_ID;
 	ID_EX.operA = reg[IF_ID.pipedInst.s1];				//loads s1 into the next latch
 	ID_EX.operB = reg[IF_ID.pipedInst.s2];				//loads s2 into the next latch
-	ID_EX.pipedInst = IF_ID.pipedInst;					//Passes the instruction and PC down the pipe and sets it as valid
-	ID_EX.instPC = IF_ID.instPC;
-	ID_EX.validItem = 1;
+//	ID_EX.pipedInst = IF_ID.pipedInst;					//Passes the instruction and PC down the pipe and sets it as valid
+//	ID_EX.instPC = IF_ID.instPC;
+//	ID_EX.validItem = 1;
 }
 
 void ID(){
@@ -171,10 +172,11 @@ void ID(){
 					assert(0 == 1);						//Halt the code if this error message has been printed
 				}
 				
+				ID_EX = IF_ID;
 				ID_EX.operA = reg[IF_ID.pipedInst.s1];	//loads s1 into the next latch
-				ID_EX.pipedInst = IF_ID.pipedInst;		//Passes the instruction and PC down the pipe and sets it as valid
-				ID_EX.instPC = IF_ID.instPC;			//Note we did not have to load s2 and we have checked the immediate value
-				ID_EX.validItem = 1;
+				//ID_EX.pipedInst = IF_ID.pipedInst;		//Passes the instruction and PC down the pipe and sets it as valid
+				//ID_EX.instPC = IF_ID.instPC;			//Note we did not have to load s2 and we have checked the immediate value
+				//ID_EX.validItem = 1;
 				
 				EXdelay = n;							//Set the EXdelay for normal operation delay
 				break;
@@ -184,22 +186,23 @@ void ID(){
 				//check that im value is in range for 16 bit 2's comp, +/- 32767 (2^15 - 1)
 				if((IF_ID.pipedInst.im < -32767)||(IF_ID.pipedInst.im > 32767)){
 					printf("Immediate field out of numerical bounds, %d", IF_ID.pipedInst.im);	//Note we did not just use two assertions because we wanted to print an error message
-					assert(0 == 1);						//Halt the code if this error message has been printed
+					exit();						//Halt the code if this error message has been printed
 				}
 				IDpush();								//Note that sw is handled the same as add,sub but it also needs the immediate value checked
 				EXdelay = n;							//Set the EXdelay for normal operation delay
 				break;
 				
 			case 7:										//halt
-				ID_EX.pipedInst = IF_ID.pipedInst;		//Push the halt instruction down the pipe
-				ID_EX.instPC = IF_ID.instPC;			//Push the pc for good measure
-				ID_EX.validItem = 1;					//Mark the latch as ready for consumption so the halt propagates
+				ID_EX = IF_ID;
+				//ID_EX.pipedInst = IF_ID.pipedInst;		//Push the halt instruction down the pipe
+				//ID_EX.instPC = IF_ID.instPC;			//Push the pc for good measure
+				//ID_EX.validItem = 1;					//Mark the latch as ready for consumption so the halt propagates
 				EXdelay = 1;							//Set the EXdelay to be 1 for fast propagation
 				return;									//Return so we don't count as useful work or clear the latch
 				
 			default:
 				printf("Op Code not recognized: ID Stage");
-				assert(0 == 1);							//If it doesn't decode one of the 7 possibilities there is an error, should be caught by the parser, but this is a backup
+				exit();									//If it doesn't decode one of the 7 possibilities there is an error, should be caught by the parser, but this is a backup
 				return;
 		}
 		
@@ -212,8 +215,75 @@ void EX(int n, int m){
 //n cycles or m cycles for multiply
 }
 
-void MEM(int c){
-//c cycles
+void MEM(){
+	if((EX_MEM.validItem == 1)&&(MEM_WB.validItem == 0)){
+		switch(EX_MEM.pipedInst.op){
+			case 0:											//add
+			case 1:											//addi
+			case 2:											//sub
+			case 3:											//mul
+			case 4:											//beq
+				MEM_WB = EX_MEM;
+				//MEM_WB.pipedInst = EX_MEM.pipedInst;		//Push the instruction down the pipe
+				//MEM_WB.instPC = EX_MEM.instPC;				//None of these need the MEM stage so they pass through in one cycle
+				//MEM_WB.validItem = 1;						//
+				break;
+				
+			case 5:											//lw
+				if(MEMdelay == 0){							//Once the delay count down is finished push to the latch
+					MEM_WB = EX_MEM;
+					if(EX_MEM.EXresult % 4 != 0){			//Makes sure the memory alignment is correct
+						printf("Data Alignment Error, %d not divisible by 4", EX_MEM.EXresult);
+						exit();						
+					}
+					MEM_WB.EXresult = dMem[EX_MEM.EXresult/4];	//Our dMem is indexed by words, so we divide bytes by 4 to get word indexing. Loads into the EXresult to be loaded into a register in WB
+					
+					//MEM_WB.pipedInst = EX_MEM.pipedInst;	//Push the instruction down the pipe when everything is done.
+					//MEM_WB.instPC = EX_MEM.instPC;
+					//MEM_WB.validItem = 1;
+					
+					MEMdelay = c;							//Resets delay for the next instruction
+				}
+				else{
+					MEMdelay -= 1;							//Counts down the delay for the MEM stage
+					assert(MEMdelay > -1); 					//Catch if this decreases too much
+				}
+				
+				break;
+			case 6:											//sw
+				if(MEMdelay == 0){							//Once the delay count down is finished push to the latch
+					MEM_WB = EX_MEM;
+					if(EX_MEM.EXresult % 4 != 0){			//Makes sure the memory alignment is correct
+						printf("Data Alignment Error, %d not divisible by 4", EX_MEM.EXresult);
+						exit();						
+					}
+					dMem[EX_MEM.EXresult/4] = reg[EX_MEM.pipedInst.s2];	//Stores the proper register into dMem
+				
+					//MEM_WB.pipedInst = EX_MEM.pipedInst;	//Push the instruction down the pipe when everything is done.
+					//MEM_WB.instPC = EX_MEM.instPC;
+					//MEM_WB.validItem = 1;
+					
+					MEMdelay = c;							//Resets delay for the next instruction
+				}
+				else{
+					MEMdelay -= 1;							//Counts down the delay for the MEM stage
+					assert(MEMdelay > -1); 					//Catch if this decreases too much
+				}
+								
+				break;										
+			
+			case 7:											//halt
+				MEM_WB.pipedInst = EX_MEM.pipedInst;		//Push the halt instruction down the pipe
+				MEM_WB.instPC = EX_MEM.instPC;				//Push the pc for good measure
+				MEM_WB.validItem = 1;						//Mark the latch as ready for consumption so the halt propagates
+				return;
+			default:
+				printf("Op code not recognized: WB stage");
+				exit();										//Catches errors in op codes
+		}
+		EM_MEM = tempLatch;
+		MEMcycles ++;
+	}
 }
 
 //might need to change sw and beq if they don't count as useful cycles
@@ -239,7 +309,7 @@ void WB(){
 				return;
 			default:
 				printf("Op code not recognized: WB stage");
-				assert(0 == 1);						//Catches errors in op codes
+				exit();						//Catches errors in op codes
 		}
 		MEM_WB = tempLatch;
 		WBcycles ++;
