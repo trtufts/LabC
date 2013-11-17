@@ -17,12 +17,13 @@ struct inst{
 
 struct latch{
 	struct inst pipedInst;
-	int validItem;
+	int validItem; //0 when the producing stage can act
+	int instPC;
 }
 
 struct inst iMem[];
 int dMem[];
-long int reg[];
+int reg[];
 struct latch IF_ID;
 struct latch ID_EX;
 struct latch EX_MEM;
@@ -33,16 +34,47 @@ int IDcycles;
 int EXcycles;
 int MEMcycles;
 int WBcycles;
-int pc;
-int branchPending;
+int pc;	//lowercase pc for the main pc, instPC for values sent down the pipe, for clarity
+int branchPending; //1 when there is a branch pending, 0 otherwise
+int IFdelay; //Used to simulate long stages
+int EXdelay;
+int nextEXdelay; //Used to dynamically assign delay to the EX stage
+int MEMdelay;
+int c;
+int m;
+int n;
+int halt;	//1 when the program should be halting, 0 otherwise
 int simMode;
 
-void IF(int c){
-//c cycles
+void IF(){
+	if(IF_ID.pipedInst == 7){	//If halt has passed through here, it just auto returns
+		return;
+	}
+	if((IF_ID.validItem == 0)&&(branchPending == 0)){	//If the latch is ready and there is no branch pending, IF acts
+		if(IFdelay == 0){								//Once the delay count down is finished push to the latch
+			IF_ID.pipedInst = iMem(pc);					//Push the instruction into the pipe
+			IF_ID.instPC = pc;							//Store the pc with the instruction in the latch
+			IF_ID.validItem = 1;						//Mark the latch as ready for consumption
+			
+			pc ++;										//Increment the pc for the next instruction (note we go by one because iMem is indexed by instruction not bits)
+			IFcycles ++;								//This is a useful cycle for the IF stage
+			IFdelay == c;								//Resets delay for the next instruction
+		}
+		else{
+			IFdelay -= 1;								//Counts down the delay for the IF stage
+			IFcycles ++;								//This is a useful cycle for the IF stage
+			assert(IFdelay > -1); //Catch if this decreases too much
+		}
+		
+	}
 }
 
 void ID(){
 //One cycle
+
+		if(IF_ID.pipedInst.op == 4){				//If it reads a branch, mark branch pending
+			branchPending = 1;
+		}
 }
 
 void EX(int n, int m){
@@ -105,10 +137,15 @@ char * progScanner(FILE *inputFile, char * instruction){
 main(int argc, char* argv[]){
 	//instantiate the Mem's
 	iMem = malloc(512*sizeof(struct int)); //1 instruction takes up 1 word, so iMem is an array of 512 instructions
-	dMem = malloc(2048*sizeof(int)); //Data memory is stored as bytes
+	dMem = malloc(512*sizeof(int)); //Data memory is stored as words since that is the smallest unit we will be using here
+	int i;
+	for(i=0; i < 512; i++){
+		dMem[i] = 0;
+	}
+	
 	
 	//instantiate the registers
-	reg = malloc(32*sizeof(long int));
+	reg = malloc(32*sizeof(int));
 	reg[0] = 0;
 
 	//instantiates the utilization data collection variables
@@ -121,17 +158,23 @@ main(int argc, char* argv[]){
 	
 	//instantiates general function variables
 	pc = 0;
+	halt = 1;
 	struct inst tempInst = {0, 0, 0, 0, 0};
-	IF_ID = {tempInst, 0};
-	ID_EX = {tempInst, 0};
-	EX_MEM = {tempInst, 0};
-	MEM_WB = {tempInst, 0};
+	IF_ID = {tempInst, 0, 0};
+	ID_EX = {tempInst, 0, 0};
+	EX_MEM = {tempInst, 0, 0};
+	MEM_WB = {tempInst, 0, 0};
 	
 	//Parse inputs to get file name, Mem time c, Multiply time m, EX op time n
 	string inputFileName = argv[argc-4];
-	int c = atoi(argv[argc-3]);
-	int m = atoi(argv[argc-2]);
-	int n = atoi(argv[argc-1)];
+	c = atoi(argv[argc-3]);
+	m = atoi(argv[argc-2]);
+	n = atoi(argv[argc-1)];
+	IFdelay = c;
+	EXdelay = 0;
+	nextEXdelay = 0;
+	MEMdelay = c;
+	
 	
 	assert(c>0);	//These three variables should be greater than 0, or else it causes problems later
 	assert(m>0);
@@ -147,9 +190,23 @@ main(int argc, char* argv[]){
 	do{
 		instruction = progScanner(inputFile, instruction);
 		tempInst = parser(instruction);
-		
+		iMem[pc] = tempInst;
+		pc += 1;
+		assert(pc < 512); //Only 512 instructions fit in the memory
 	} while(tempInst.op != 7);
 	fclose(inputFile);
+	
+	pc = 0; //reset pc to 0
+	
+	while((halt != 1)&&(IF_ID.pipedInst.op != 7)&&(ID_EX.pipedInst.op != 7)&&(EX_MEM.pipedInst.op != 7)&&(MEM_WB.pipedInst.op != 7)){
+		WB();
+		MEM();
+		EX();
+		ID();
+		IF();
+		totalCycles++;
+		
+	}
 	
 	
 }
