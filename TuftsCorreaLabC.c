@@ -17,8 +17,10 @@ struct inst{
 
 struct latch{
 	struct inst pipedInst;
-	int validItem; //0 when the producing stage can act
+	int validItem; 										//0 when the producing stage can act
 	int instPC;
+	int operA;											//operand A first operand for the EX stage
+	int operB;											//operand B second operand for the EX stage
 }
 
 struct inst iMem[];
@@ -35,16 +37,15 @@ int IDcycles;
 int EXcycles;
 int MEMcycles;
 int WBcycles;
-int pc;	//lowercase pc for the main pc, instPC for values sent down the pipe, for clarity
-int branchPending; //1 when there is a branch pending, 0 otherwise
-int IFdelay; //Used to simulate long stages
+int pc;													//lowercase pc for the main pc, instPC for values sent down the pipe, for clarity
+int branchPending; 										//1 when there is a branch pending, 0 otherwise
+int IFdelay; 											//Used to simulate long stages
 int EXdelay;
-int nextEXdelay; //Used to dynamically assign delay to the EX stage
 int MEMdelay;
 int c;
 int m;
 int n;
-int halt;	//1 when the program should be halting, 0 otherwise
+int halt;												//1 when the program should be halting, 0 otherwise
 int simMode;
 
 void IF(){
@@ -66,65 +67,142 @@ void IF(){
 			IFcycles ++;								//This is a useful cycle for the IF stage
 			assert(IFdelay > -1); 						//Catch if this decreases too much
 		}
-		
 	}
+	//if branch pending = 2 set to 0, EX should set to 2 instead of 0 so it fetches the cycle AFTER it gets resolved
 }
 
-int regCheck(int sReg, int regType){					//sReg is the register number, regType = 1 is s1, regType = 2 is s2
-	assert((regType != 1)&&(regType != 2));				//if the regType is not 1 or 2 this function is being used wrong
-	if(regType = 1){
-		if((EX_MEM.validItem == 1)&&(EX_MEM.s1 == sReg)){	//This only checks against registers that are in valid latches
-			return 1;
-		}
-		if((MEM_WB.validItem == 1)&&(MEM_WB.s1 == sReg)){
-			return 1;
+int regCheck(int sReg){					//sReg is the register number that is being checked
+	if(EX_MEM.validItem == 1){						//This only checks against registers that are in valid latches
+		switch(EX_MEM.pipedInst.op){				//Needs to check against different registers for different instructions
+			case 0:									//add, sub, mul all produce to the d register
+			case 2:
+			case 3:
+				if(EX_MEM.pipedInst.d == sReg) return 1;
+				break;
+			case 1:									//addi and lw produce to the s2 register
+			case 5:
+				if(EX_MEM.pipedInst.s2 == sReg) return 1;
+				break;
+			case 4:									//beq, sw and halt produce nothing
+			case 6:
+			case 7:
+				break;
+			default:
+				printf("Op Code not recognized: EX_MEM Latch");
+				assert(0 == 1);						//This should never be reached
 		}
 	}
-	if(regType = 2){
-		if((EX_MEM.validItem == 1)&&(EX_MEM.s2 == sReg)){	//This only checks against registers that are in valid latches
-			return 1;
-		}
-		if((MEM_WB.validItem == 1)&&(MEM_WB.s2 == sReg)){
-			return 1;
+	if(MEM_WB.validItem == 1){
+		switch(MEM_WB.pipedInst.op){				//Needs to check against different registers for different instructions
+			case 0:									//add, sub, mul all produce to the d register
+			case 2:
+			case 3:
+				if(MEM_WB.pipedInst.d == sReg) return 1;
+				break;
+			case 1:									//addi and lw produce to the s2 register
+			case 5:
+				if(MEM_WB.pipedInst.s2 == sReg) return 1;
+				break;
+			case 4:									//beq, sw and halt produce nothing
+			case 6:
+			case 7:
+				break;
+			default:
+				printf("Op Code not recognized: MEM_WB Latch");
+				assert(0 == 1);						//This should never be reached
 		}
 	}
-	
-	return 0;											//If it never catches, the register is fine
+	return 0;										//If it never catches, the register is fine
 }
 
+//CONSIDER MAKING A FUNCTION THAT LOADS OPERANDS AND PASSES THE FUNCTION AS THAT BIT OF CODE IS REPEATED A LOT (Done by every instruction except addi and lw)
 void ID(){
 	if(ID_EX.pipedInst == 7){							//If halt has passed through here, it just auto returns
 		return;
 	}
 	if((IF_ID.validItem == 1)&&(ID_EX.validItem == 0)){	//If both latches are ready go to the instruction switch statements
-		if(regCheck(IF_ID.pipedInst.s1, 1) == 1) return;		//Every instruction needs to check the first source register, s1
+		if(regCheck(IF_ID.pipedInst.s1) == 1) return;	//Every instruction needs to check the first source register, s1
 		switch(IF_ID.pipedInst.op){						//Instruction cases are grouped for efficiency because certain instructions have the same actions
 			case 0:										//add
 			case 2:										//sub
-				if(regCheck(IF_ID.pipedInst.s2, 2) == 1) return;	//Checks s2 for add and sub, if they pass they have the same ID step
+				if(regCheck(IF_ID.pipedInst.s2) == 1) return;	//Checks s2 for add and sub, these two instructions have the same ID step
+				ID_EX.operA = reg[IF_ID.pipedInst.s1];	//loads s1 into the next latch
+				ID_EX.operB = reg[IF_ID.pipedInst.s2];	//loads s2 into the next latch
+				ID_EX.pipedInst = IF_ID.pipedInst;		//Passes the instruction and PC down the pipe and sets it as valid
+				ID_EX.instPC = IF_ID.instPC;
+				ID_EX.validItem = 1;
 				
+				EXdelay = n;							//Set the EXdelay for normal operation delay
 				break;
+				
 			case 3:										//mul			
-				if(regCheck(IF_ID.pipedInst.s2, 2) == 1) return;	//Checks s2 for mul, it has a different ID step than add and sub
+				if(regCheck(IF_ID.pipedInst.s2) == 1) return;	//Checks s2 for mul, it has a different ID step than add and sub
+				ID_EX.operA = reg[IF_ID.pipedInst.s1];	//loads s1 into the next latch
+				ID_EX.operB = reg[IF_ID.pipedInst.s2];	//loads s2 into the next latch
+				ID_EX.pipedInst = IF_ID.pipedInst;		//Passes the instruction and PC down the pipe and sets it as valid
+				ID_EX.instPC = IF_ID.instPC;
+				ID_EX.validItem = 1;
+				
+				EXdelay = m;							//Set the EXdelay for multiplication delay (difference between add and sub for passing to EX)
 				break;
+				
 			case 4:										//beq
-				if(regCheck(IF_ID.pipedInst.s1, 1) == 1) return;	//Checks s2 of beq, it has a different ID step than the mul, add and sub
+				if(regCheck(IF_ID.pipedInst.s2) == 1) return;	//Checks s2 of beq, it has a different ID step than the mul, add and sub
+				//check that im value is in range for 16 bit 2's comp, +/- 32767 (2^15 - 1)
+				if((IF_ID.pipedInst.im < -32767)||(IF_ID.pipedInst.im > 32767)){
+					printf("Immediate field out of numerical bounds, %d", IF_ID.pipedInst.im);	//Note we did not just use two assertions because we wanted to print an error message
+					assert(0 == 1);						//Halt the code if this error message has been printed
+				}
+
+				ID_EX.operA = reg[IF_ID.pipedInst.s1];	//loads s1 into the next latch
+				ID_EX.operB = reg[IF_ID.pipedInst.s2];	//loads s2 into the next latch
+				ID_EX.pipedInst = IF_ID.pipedInst;		//Passes the instruction and PC down the pipe and sets it as valid
+				ID_EX.instPC = IF_ID.instPC;
+				ID_EX.validItem = 1;
+				
 				branchPending = 1;						//If it reads a branch, mark branch pending
+				EXdelay = n;							//Set the EXdelay for normal operation delay
 				break;
+				
 			case 1:										//addi
 			case 5:										//lw
-			
-				break;
-			case 6:										//sw
-				if(regCheck(IF_ID.pipedInst.s1, 1) == 1) return;	//Checks s2 of sw, it relies on s2 while addi and lw do not
+				//check that im value is in range for 16 bit 2's comp, +/- 32767 (2^15 - 1)
+				if((IF_ID.pipedInst.im < -32767)||(IF_ID.pipedInst.im > 32767)){
+					printf("Immediate field out of numerical bounds, %d", IF_ID.pipedInst.im);	//Note we did not just use two assertions because we wanted to print an error message
+					assert(0 == 1);						//Halt the code if this error message has been printed
+				}
 				
+				ID_EX.operA = reg[IF_ID.pipedInst.s1];	//loads s1 into the next latch
+				ID_EX.pipedInst = IF_ID.pipedInst;		//Passes the instruction and PC down the pipe and sets it as valid
+				ID_EX.instPC = IF_ID.instPC;			//Note we did not have to load s2 and we have checked the immediate value
+				ID_EX.validItem = 1;
+				
+				EXdelay = n;							//Set the EXdelay for normal operation delay
 				break;
+				
+			case 6:										//sw
+				if(regCheck(IF_ID.pipedInst.s2) == 1) return;	//Checks s2 of sw, it relies on s2 while addi and lw do not
+				//check that im value is in range for 16 bit 2's comp, +/- 32767 (2^15 - 1)
+				if((IF_ID.pipedInst.im < -32767)||(IF_ID.pipedInst.im > 32767)){
+					printf("Immediate field out of numerical bounds, %d", IF_ID.pipedInst.im);	//Note we did not just use two assertions because we wanted to print an error message
+					assert(0 == 1);						//Halt the code if this error message has been printed
+				}
+				
+				ID_EX.operA = reg[IF_ID.pipedInst.s1];	//loads s1 into the next latch
+				ID_EX.operB = reg[IF_ID.pipedInst.s2];	//loads s2 into the next latch
+				ID_EX.pipedInst = IF_ID.pipedInst;		//Passes the instruction and PC down the pipe and sets it as valid
+				ID_EX.instPC = IF_ID.instPC;			//Note that we have checked the immediate value and loaded both s1 and s2
+				ID_EX.validItem = 1;
+				
+				EXdelay = n;							//Set the EXdelay for normal operation delay
+				break;
+				
 			case 7:										//halt
 				ID_EX.pipedInst = IF_ID.pipedInst;		//Push the halt instruction down the pipe
 				ID_EX.instPC = IF_ID.instPC;			//Push the pc for good measure
 				ID_EX.validItem = 1;					//Mark the latch as ready for consumption so the halt propagates
-				nextEXdelay = 1;						//Set the EXdelay to be 1 for fast propagation
-				return;
+				EXdelay = 1;							//Set the EXdelay to be 1 for fast propagation
+				return;									//Return so we don't count as useful work or clear the latch
 				
 			default:
 				printf("Op Code not recognized: ID Stage");
@@ -222,10 +300,10 @@ main(int argc, char* argv[]){
 	pc = 0;
 	halt = 1;
 	tempInst = {0, 0, 0, 0, 0};
-	IF_ID = {tempInst, 0, 0};
-	ID_EX = {tempInst, 0, 0};
-	EX_MEM = {tempInst, 0, 0};
-	MEM_WB = {tempInst, 0, 0};
+	IF_ID = {tempInst, 0, 0, 0, 0};
+	ID_EX = {tempInst, 0, 0, 0, 0};
+	EX_MEM = {tempInst, 0, 0, 0, 0};
+	MEM_WB = {tempInst, 0, 0, 0, 0};
 	
 	//Parse inputs to get file name, Mem time c, Multiply time m, EX op time n
 	string inputFileName = argv[argc-4];
@@ -234,7 +312,6 @@ main(int argc, char* argv[]){
 	n = atoi(argv[argc-1)];
 	IFdelay = c;
 	EXdelay = 0;
-	nextEXdelay = 0;
 	MEMdelay = c;
 	
 	
