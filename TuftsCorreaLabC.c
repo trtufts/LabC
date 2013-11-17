@@ -21,6 +21,7 @@ struct latch{
 	int instPC;
 	int operA;											//operand A first operand for the EX stage
 	int operB;											//operand B second operand for the EX stage
+	int EXresult;										//Result from the EX stage
 }
 
 struct inst iMem[];
@@ -31,6 +32,7 @@ struct latch ID_EX;
 struct latch EX_MEM;
 struct latch MEM_WB;
 struct inst tempInst;
+struct latch tempLatch;
 int totalCycles;
 int IFcycles;
 int IDcycles;
@@ -49,11 +51,16 @@ int halt;												//1 when the program should be halting, 0 otherwise
 int simMode;
 
 void IF(){
-	if(IF_ID.pipedInst == 7){							//If halt has passed through here, it just auto returns
+	if(IF_ID.pipedInst.op == 7){							//If halt has passed through here, it just auto returns
 		return;
 	}
 	if((IF_ID.validItem == 0)&&(branchPending == 0)){	//If the latch is ready and there is no branch pending, IF acts
-		if(IFdelay == 0){								//Once the delay count down is finished push to the latch
+		if(iMem(pc).op == 7){							//Halt instruction skips the delay
+			IF_ID.pipedInst = iMem(pc);					//Push the instruction into the pipe
+			IF_ID.instPC = pc;							//Store the pc with the instruction in the latch
+			IF_ID.validItem = 1;						//Mark the latch as ready for consumption
+		}
+		else if(IFdelay == 0){								//Once the delay count down is finished push to the latch
 			IF_ID.pipedInst = iMem(pc);					//Push the instruction into the pipe
 			IF_ID.instPC = pc;							//Store the pc with the instruction in the latch
 			IF_ID.validItem = 1;						//Mark the latch as ready for consumption
@@ -71,7 +78,7 @@ void IF(){
 	//if branch pending = 2 set to 0, EX should set to 2 instead of 0 so it fetches the cycle AFTER it gets resolved
 }
 
-int regCheck(int sReg){					//sReg is the register number that is being checked
+int regCheck(int sReg){								//sReg is the register number that is being checked
 	if(EX_MEM.validItem == 1){						//This only checks against registers that are in valid latches
 		switch(EX_MEM.pipedInst.op){				//Needs to check against different registers for different instructions
 			case 0:									//add, sub, mul all produce to the d register
@@ -115,7 +122,15 @@ int regCheck(int sReg){					//sReg is the register number that is being checked
 	return 0;										//If it never catches, the register is fine
 }
 
-//CONSIDER MAKING A FUNCTION THAT LOADS OPERANDS AND PASSES THE FUNCTION AS THAT BIT OF CODE IS REPEATED A LOT (Done by every instruction except addi and lw)
+
+void IDpush(){											//These 5 lines were repeated enough to warrant a new function to reduce code
+	ID_EX.operA = reg[IF_ID.pipedInst.s1];				//loads s1 into the next latch
+	ID_EX.operB = reg[IF_ID.pipedInst.s2];				//loads s2 into the next latch
+	ID_EX.pipedInst = IF_ID.pipedInst;					//Passes the instruction and PC down the pipe and sets it as valid
+	ID_EX.instPC = IF_ID.instPC;
+	ID_EX.validItem = 1;
+}
+
 void ID(){
 	if(ID_EX.pipedInst == 7){							//If halt has passed through here, it just auto returns
 		return;
@@ -126,23 +141,13 @@ void ID(){
 			case 0:										//add
 			case 2:										//sub
 				if(regCheck(IF_ID.pipedInst.s2) == 1) return;	//Checks s2 for add and sub, these two instructions have the same ID step
-				ID_EX.operA = reg[IF_ID.pipedInst.s1];	//loads s1 into the next latch
-				ID_EX.operB = reg[IF_ID.pipedInst.s2];	//loads s2 into the next latch
-				ID_EX.pipedInst = IF_ID.pipedInst;		//Passes the instruction and PC down the pipe and sets it as valid
-				ID_EX.instPC = IF_ID.instPC;
-				ID_EX.validItem = 1;
-				
+				IDpush();
 				EXdelay = n;							//Set the EXdelay for normal operation delay
 				break;
 				
 			case 3:										//mul			
 				if(regCheck(IF_ID.pipedInst.s2) == 1) return;	//Checks s2 for mul, it has a different ID step than add and sub
-				ID_EX.operA = reg[IF_ID.pipedInst.s1];	//loads s1 into the next latch
-				ID_EX.operB = reg[IF_ID.pipedInst.s2];	//loads s2 into the next latch
-				ID_EX.pipedInst = IF_ID.pipedInst;		//Passes the instruction and PC down the pipe and sets it as valid
-				ID_EX.instPC = IF_ID.instPC;
-				ID_EX.validItem = 1;
-				
+				IDpush();
 				EXdelay = m;							//Set the EXdelay for multiplication delay (difference between add and sub for passing to EX)
 				break;
 				
@@ -153,13 +158,7 @@ void ID(){
 					printf("Immediate field out of numerical bounds, %d", IF_ID.pipedInst.im);	//Note we did not just use two assertions because we wanted to print an error message
 					assert(0 == 1);						//Halt the code if this error message has been printed
 				}
-
-				ID_EX.operA = reg[IF_ID.pipedInst.s1];	//loads s1 into the next latch
-				ID_EX.operB = reg[IF_ID.pipedInst.s2];	//loads s2 into the next latch
-				ID_EX.pipedInst = IF_ID.pipedInst;		//Passes the instruction and PC down the pipe and sets it as valid
-				ID_EX.instPC = IF_ID.instPC;
-				ID_EX.validItem = 1;
-				
+				IDpush();
 				branchPending = 1;						//If it reads a branch, mark branch pending
 				EXdelay = n;							//Set the EXdelay for normal operation delay
 				break;
@@ -187,13 +186,7 @@ void ID(){
 					printf("Immediate field out of numerical bounds, %d", IF_ID.pipedInst.im);	//Note we did not just use two assertions because we wanted to print an error message
 					assert(0 == 1);						//Halt the code if this error message has been printed
 				}
-				
-				ID_EX.operA = reg[IF_ID.pipedInst.s1];	//loads s1 into the next latch
-				ID_EX.operB = reg[IF_ID.pipedInst.s2];	//loads s2 into the next latch
-				ID_EX.pipedInst = IF_ID.pipedInst;		//Passes the instruction and PC down the pipe and sets it as valid
-				ID_EX.instPC = IF_ID.instPC;			//Note that we have checked the immediate value and loaded both s1 and s2
-				ID_EX.validItem = 1;
-				
+				IDpush();								//Note that sw is handled the same as add,sub but it also needs the immediate value checked
 				EXdelay = n;							//Set the EXdelay for normal operation delay
 				break;
 				
@@ -210,9 +203,7 @@ void ID(){
 				return;
 		}
 		
-		IF_ID.validItem = 0;
-		IF_ID.pipedInst = tempInst;
-		IF_ID.instPC = 0;
+		IF_ID = tempLatch;
 		IDcycles ++;
 	}
 }
@@ -225,8 +216,34 @@ void MEM(int c){
 //c cycles
 }
 
+//might need to change sw and beq if they don't count as useful cycles
 void WB(){
-//One cycle
+	if(MEM_WB.validItem == 1){
+		switch(MEM_WB.pipedInst.op){
+			case 0:											//add
+			case 2:											//sub
+			case 3:											//mul
+				reg[MEM_WB.pipedInst.d] = MEM_WB.EXresult;	//Stores the result in the proper destination register
+				break;
+			
+			case 1:											//addi
+			case 5:											//lw
+				reg[MEM_WB.pipedInst.s2] = MEM_WB.EXresult;	//Stores the result in the proper destination register
+				break;
+			
+			case 4:											//beq
+			case 6:											//sw
+				break;										//Does nothing
+			
+			case 7:											//halt
+				return;
+			default:
+				printf("Op code not recognized: WB stage");
+				assert(0 == 1);						//Catches errors in op codes
+		}
+		MEM_WB = tempLatch;
+		WBcycles ++;
+	}
 }
 
 //Needs to pick R or I type, and parse stuff into numbers for iMem
@@ -300,16 +317,18 @@ main(int argc, char* argv[]){
 	pc = 0;
 	halt = 1;
 	tempInst = {0, 0, 0, 0, 0};
-	IF_ID = {tempInst, 0, 0, 0, 0};
-	ID_EX = {tempInst, 0, 0, 0, 0};
-	EX_MEM = {tempInst, 0, 0, 0, 0};
-	MEM_WB = {tempInst, 0, 0, 0, 0};
+	tempLatch = {tempInst, 0, 0, 0, 0, 0};
+	IF_ID = tempLatch;
+	ID_EX = tempLatch;
+	EX_MEM = tempLatch;
+	MEM_WB = tempLatch;
 	
 	//Parse inputs to get file name, Mem time c, Multiply time m, EX op time n
-	string inputFileName = argv[argc-4];
-	c = atoi(argv[argc-3]);
-	m = atoi(argv[argc-2]);
-	n = atoi(argv[argc-1)];
+	string inputFileName = argv[argc-5];
+	c = atoi(argv[argc-4]);
+	m = atoi(argv[argc-3]);
+	n = atoi(argv[argc-2)];
+	simMode = atoi(argv[argc-1]);
 	IFdelay = c;
 	EXdelay = 0;
 	MEMdelay = c;
@@ -340,7 +359,7 @@ main(int argc, char* argv[]){
 	
 	pc = 0; //reset pc to 0
 	
-	while((halt != 1)&&(IF_ID.pipedInst.op != 7)&&(ID_EX.pipedInst.op != 7)&&(EX_MEM.pipedInst.op != 7)&&(MEM_WB.pipedInst.op != 7)){
+	while((IF_ID.pipedInst.op != 7)||(ID_EX.pipedInst.op != 7)||(EX_MEM.pipedInst.op != 7)||(MEM_WB.pipedInst.op != 7)){
 		WB();
 		MEM();
 		EX();
