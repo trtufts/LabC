@@ -4,35 +4,41 @@
 #include <string.h>
 #include <assert.h>
 
-enum inst {ADD,ADDI,SUB,MULT,BEQ,LW,SW,HALT};
-
 //Consider changinng to typedef to remove struct code clutter
-struct inst{
-	int op;
+typedef struct{
+	int op;												//Op reference: 0 = add, 1 = add1, 2 = sub, 3 = mul, 4 = beq, 5 = lw, 6 = sw, 7 = halt
 	int d;
 	int s1;
 	int s2;
 	int im;
-};
+} inst;
 
-struct latch{
-	struct inst pipedInst;
+typedef struct{
+	//struct inst pipedInst;
+	inst pipedInst;
 	int validItem; 										//0 when the producing stage can act
 	int instPC;
 	int operA;											//operand A first operand for the EX stage
 	int operB;											//operand B second operand for the EX stage
 	int EXresult;										//Result from the EX stage
-}
+} latch;
 
-struct inst iMem[];
-int dMem[];
-int reg[];
-struct latch IF_ID;
-struct latch ID_EX;
-struct latch EX_MEM;
-struct latch MEM_WB;
-struct inst tempInst;
-struct latch tempLatch;
+//struct inst *iMem;
+inst *iMem;
+int *dMem;
+int *reg;
+//struct latch IF_ID;
+//struct latch ID_EX;
+//struct latch EX_MEM;
+//struct latch MEM_WB;
+//struct inst tempInst;
+//struct latch tempLatch;
+latch IF_ID;
+latch ID_EX;
+latch EX_MEM;
+latch MEM_WB;
+inst tempInst;
+latch tempLatch;
 int totalCycles;
 int IFcycles;
 int IDcycles;
@@ -55,13 +61,13 @@ void IF(){
 		return;
 	}
 	if((IF_ID.validItem == 0)&&(branchPending == 0)){	//If the latch is ready and there is no branch pending, IF acts
-		if(iMem(pc).op == 7){							//Halt instruction skips the delay
-			IF_ID.pipedInst = iMem(pc);					//Push the instruction into the pipe
+		if(iMem[pc].op == 7){							//Halt instruction skips the delay
+			IF_ID.pipedInst = iMem[pc];					//Push the instruction into the pipe
 			IF_ID.instPC = pc;							//Store the pc with the instruction in the latch
 			IF_ID.validItem = 1;						//Mark the latch as ready for consumption
 		}
 		else if(IFdelay == 0){								//Once the delay count down is finished push to the latch
-			IF_ID.pipedInst = iMem(pc);					//Push the instruction into the pipe
+			IF_ID.pipedInst = iMem[pc];					//Push the instruction into the pipe
 			IF_ID.instPC = pc;							//Store the pc with the instruction in the latch
 			IF_ID.validItem = 1;						//Mark the latch as ready for consumption
 			
@@ -96,7 +102,7 @@ int regCheck(int sReg){								//sReg is the register number that is being check
 				break;
 			default:
 				printf("Op Code not recognized: EX_MEM Latch");
-				exit();						//This should never be reached
+				exit(1);						//This should never be reached
 		}
 	}
 	if(MEM_WB.validItem == 1){
@@ -116,7 +122,7 @@ int regCheck(int sReg){								//sReg is the register number that is being check
 				break;
 			default:
 				printf("Op Code not recognized: MEM_WB Latch");
-				exit();						//This should never be reached
+				exit(1);						//This should never be reached
 		}
 	}
 	return 0;										//If it never catches, the register is fine
@@ -186,7 +192,7 @@ void ID(){
 				//check that im value is in range for 16 bit 2's comp, +/- 32767 (2^15 - 1)
 				if((IF_ID.pipedInst.im < -32767)||(IF_ID.pipedInst.im > 32767)){
 					printf("Immediate field out of numerical bounds, %d", IF_ID.pipedInst.im);	//Note we did not just use two assertions because we wanted to print an error message
-					exit();						//Halt the code if this error message has been printed
+					exit(1);						//Halt the code if this error message has been printed
 				}
 				IDpush();								//Note that sw is handled the same as add,sub but it also needs the immediate value checked
 				EXdelay = n;							//Set the EXdelay for normal operation delay
@@ -202,7 +208,7 @@ void ID(){
 				
 			default:
 				printf("Op Code not recognized: ID Stage");
-				exit();									//If it doesn't decode one of the 7 possibilities there is an error, should be caught by the parser, but this is a backup
+				exit(1);									//If it doesn't decode one of the 7 possibilities there is an error, should be caught by the parser, but this is a backup
 				return;
 		}
 		
@@ -215,7 +221,7 @@ void EX(){
 	if(EX_MEM.pipedInst.op == 7){						//If halt has passed through here, it just auto returns
 		return;
 	}
-	else if((ID_EX.validItem == 1){						//Check previous latch to see if it can start it's operation
+	else if(ID_EX.validItem == 1){						//Check previous latch to see if it can start it's operation
 		if((EXdelay == 0)&&(EX_MEM.validItem == 0)){ 	//Once the delay count down is finished and the latch is ready to receive, compute and push
 			EX_MEM = ID_EX;
 			switch(ID_EX.pipedInst.op){
@@ -231,7 +237,7 @@ void EX(){
 				case 4:
 					if(ID_EX.operA == ID_EX.operB){
 						pc = ID_EX.pipedInst.im + ID_EX.instPC + 1;	//Advances pc by the immediate value past the pc of the next instruction
-					}
+		 			}
 					branchPending = 2;					//Set to 2 so the IF stage knows not to unfreeze until the next cycle
 					break;
 				case 1:									//addi
@@ -243,8 +249,8 @@ void EX(){
 				case 7:
 					return;
 				default:
-					print("Op Code not recognized: EX stage");
-					exit();
+					printf("Op Code not recognized: EX stage");
+					exit(1);
 			}
 			ID_EX = tempLatch;
 			EXcycles ++;
@@ -276,7 +282,7 @@ void MEM(){
 					MEM_WB = EX_MEM;
 					if(EX_MEM.EXresult % 4 != 0){			//Makes sure the memory alignment is correct
 						printf("Data Alignment Error, %d not divisible by 4", EX_MEM.EXresult);
-						exit();						
+						exit(1);						
 					}
 					MEM_WB.EXresult = dMem[EX_MEM.EXresult/4];	//Our dMem is indexed by words, so we divide bytes by 4 to get word indexing. Loads into the EXresult to be loaded into a register in WB
 					
@@ -300,7 +306,7 @@ void MEM(){
 					MEM_WB = EX_MEM;
 					if(EX_MEM.EXresult % 4 != 0){			//Makes sure the memory alignment is correct
 						printf("Data Alignment Error, %d not divisible by 4", EX_MEM.EXresult);
-						exit();						
+						exit(1);						
 					}
 					dMem[EX_MEM.EXresult/4] = reg[EX_MEM.pipedInst.s2];	//Stores the proper register into dMem
 				
@@ -327,7 +333,7 @@ void MEM(){
 				return;
 			default:
 				printf("Op code not recognized: WB stage");
-				exit();										//Catches errors in op codes
+				exit(1);										//Catches errors in op codes
 		}
 	}
 }
@@ -352,7 +358,7 @@ void WB(){
 				return;										//These instructions don't count as cycles for WB
 			default:
 				printf("Op code not recognized: WB stage");
-				exit();										//Catches errors in op codes
+				exit(1);										//Catches errors in op codes
 		}
 		MEM_WB = tempLatch;
 		WBcycles ++;
@@ -360,90 +366,92 @@ void WB(){
 }
 
 int getRegNumber(char * inputReg){
-	if((strcmp(inputReg,"zero")==0)||(strcmp(inputReg,"0")){
+	if((strcmp(inputReg,"zero")==0)||(strcmp(inputReg,"0"))){
 		return 0;
-	}else if((strcmp(inputReg,"at")==0)||(strcmp(inputReg,"1")){
+	}else if((strcmp(inputReg,"at")==0)||(strcmp(inputReg,"1"))){
 		return 1;
-	}else if((strcmp(inputReg,"v0")==0)||(strcmp(inputReg,"2")){
+	}else if((strcmp(inputReg,"v0")==0)||(strcmp(inputReg,"2"))){
 		return 2;
-	}else if((strcmp(inputReg,"v1")==0)||(strcmp(inputReg,"3")){
+	}else if((strcmp(inputReg,"v1")==0)||(strcmp(inputReg,"3"))){
 		return 3;
-	}else if((strcmp(inputReg,"a0")==0)||(strcmp(inputReg,"4")){
+	}else if((strcmp(inputReg,"a0")==0)||(strcmp(inputReg,"4"))){
 		return 4;
-	}else if((strcmp(inputReg,"a1")==0)||(strcmp(inputReg,"5")){
+	}else if((strcmp(inputReg,"a1")==0)||(strcmp(inputReg,"5"))){
 		return 5;
-	}else if((strcmp(inputReg,"a2")==0)||(strcmp(inputReg,"6")){
+	}else if((strcmp(inputReg,"a2")==0)||(strcmp(inputReg,"6"))){
 		return 6;
-	}else if((strcmp(inputReg,"a3")==0)||(strcmp(inputReg,"7")){
+	}else if((strcmp(inputReg,"a3")==0)||(strcmp(inputReg,"7"))){
 		return 7;
-	}else if((strcmp(inputReg,"t0")==0)||(strcmp(inputReg,"8")){
+	}else if((strcmp(inputReg,"t0")==0)||(strcmp(inputReg,"8"))){
 		return 8;
-	}else if((strcmp(inputReg,"t1")==0)||(strcmp(inputReg,"9")){
+	}else if((strcmp(inputReg,"t1")==0)||(strcmp(inputReg,"9"))){
 		return 9;
-	}else if((strcmp(inputReg,"t2")==0)||(strcmp(inputReg,"10")){
+	}else if((strcmp(inputReg,"t2")==0)||(strcmp(inputReg,"10"))){
 		return 10;
-	}else if((strcmp(inputReg,"t3")==0)||(strcmp(inputReg,"11")){
+	}else if((strcmp(inputReg,"t3")==0)||(strcmp(inputReg,"11"))){
 		return 11;
-	}else if((strcmp(inputReg,"t4")==0)||(strcmp(inputReg,"12")){
+	}else if((strcmp(inputReg,"t4")==0)||(strcmp(inputReg,"12"))){
 		return 12;
-	}else if((strcmp(inputReg,"t5")==0)||(strcmp(inputReg,"13")){
+	}else if((strcmp(inputReg,"t5")==0)||(strcmp(inputReg,"13"))){
 		return 13;
-	}else if((strcmp(inputReg,"t6")==0)||(strcmp(inputReg,"14")){
+	}else if((strcmp(inputReg,"t6")==0)||(strcmp(inputReg,"14"))){
 		return 14;
-	}else if((strcmp(inputReg,"t7")==0)||(strcmp(inputReg,"15")){
+	}else if((strcmp(inputReg,"t7")==0)||(strcmp(inputReg,"15"))){
 		return 15;
-	}else if((strcmp(inputReg,"s0")==0)||(strcmp(inputReg,"16")){
+	}else if((strcmp(inputReg,"s0")==0)||(strcmp(inputReg,"16"))){
 		return 16;
-	}else if((strcmp(inputReg,"s1")==0)||(strcmp(inputReg,"17")){
+	}else if((strcmp(inputReg,"s1")==0)||(strcmp(inputReg,"17"))){
 		return 17;
-	}else if((strcmp(inputReg,"s2")==0)||(strcmp(inputReg,"18")){
+	}else if((strcmp(inputReg,"s2")==0)||(strcmp(inputReg,"18"))){
 		return 18;
-	}else if((strcmp(inputReg,"s3")==0)||(strcmp(inputReg,"19")){
+	}else if((strcmp(inputReg,"s3")==0)||(strcmp(inputReg,"19"))){
 		return 19;
-	}else if((strcmp(inputReg,"s4")==0)||(strcmp(inputReg,"20")){
+	}else if((strcmp(inputReg,"s4")==0)||(strcmp(inputReg,"20"))){
 		return 20;
-	}else if((strcmp(inputReg,"s5")==0)||(strcmp(inputReg,"21")){
+	}else if((strcmp(inputReg,"s5")==0)||(strcmp(inputReg,"21"))){
 		return 21;
-	}else if((strcmp(inputReg,"s6")==0)||(strcmp(inputReg,"22")){
+	}else if((strcmp(inputReg,"s6")==0)||(strcmp(inputReg,"22"))){
 		return 22;
-	}else if((strcmp(inputReg,"s7")==0)||(strcmp(inputReg,"23")){
+	}else if((strcmp(inputReg,"s7")==0)||(strcmp(inputReg,"23"))){
 		return 23;
-	}else if((strcmp(inputReg,"t8")==0)||(strcmp(inputReg,"24")){
+	}else if((strcmp(inputReg,"t8")==0)||(strcmp(inputReg,"24"))){
 		return 24;
-	}else if((strcmp(inputReg,"t9")==0)||(strcmp(inputReg,"25")){
+	}else if((strcmp(inputReg,"t9")==0)||(strcmp(inputReg,"25"))){
 		return 25;
-	}else if((strcmp(inputReg,"k0")==0)||(strcmp(inputReg,"26")){
+	}else if((strcmp(inputReg,"k0")==0)||(strcmp(inputReg,"26"))){
 		return 26;
-	}else if((strcmp(inputReg,"k1")==0)||(strcmp(inputReg,"27")){
+	}else if((strcmp(inputReg,"k1")==0)||(strcmp(inputReg,"27"))){
 		return 27;
-	}else if((strcmp(inputReg,"gp")==0)||(strcmp(inputReg,"28")){
+	}else if((strcmp(inputReg,"gp")==0)||(strcmp(inputReg,"28"))){
 		return 28;
-	}else if((strcmp(inputReg,"sp")==0)||(strcmp(inputReg,"29")){
+	}else if((strcmp(inputReg,"sp")==0)||(strcmp(inputReg,"29"))){
 		return 29;
-	}else if((strcmp(inputReg,"fp")==0)||(strcmp(inputReg,"30")){
+	}else if((strcmp(inputReg,"fp")==0)||(strcmp(inputReg,"30"))){
 		return 30;
-	}else if((strcmp(inputReg,"ra")==0)||(strcmp(inputReg,"31")){
+	}else if((strcmp(inputReg,"ra")==0)||(strcmp(inputReg,"31"))){
 		return 31;
 	}else if(atoi(inputReg)>31){
 		printf("Register out of bounds, %d is higher than 31", atoi(inputReg));
-		exit();
+		exit(1);
 	}else {
 		printf("Register not recognized, %s is not a valid register", inputReg);
-		exit();
+		exit(1);
 	}
 }
 
 //Needs to pick R or I type, and parse stuff into numbers for iMem
-struct inst parser(char * instruction){
+//struct inst parser(char * instruction){
+inst parser(char * instruction){
 	int i;
 	char delimiters[]="$, ";  								//Define delimiters for the strtok functions
 	char ** instructionFields; 								//Define the resulting instruction fields
-	struct inst parsedInst = {0, 0, 0, 0, 0};
+	//struct inst parsedInst = {0, 0, 0, 0, 0};
+	inst parsedInst = {0, 0, 0, 0, 0};
 	int format;												//0 for R type, 1 for I type, 2 for halt
 
 	//parse first field to find opcode
 	for(i=0; i < 4; i++){
-		*(instructionFields+i) = malloc(20*sizeof(char *));
+		*(instructionFields+i) = (char *) malloc(20*sizeof(char *));
 	}
 	instructionFields[0] = strtok(instruction, delimiters);
 	instructionFields[1] = strtok(NULL, delimiters);
@@ -476,7 +484,7 @@ struct inst parser(char * instruction){
 		parsedInst.op = 7;
 	}else{
 		printf("Op code not recognized: Parser");
-		exit();
+		exit(1);
 	}
 	
 	switch(format){
@@ -489,10 +497,10 @@ struct inst parser(char * instruction){
 			parsedInst.s2 = getRegNumber(instructionFields[2]);
 			parsedInst.im = atoi(instructionFields[3]);
 		case 2:
-			return;
+			return parsedInst;
 		default:
 			printf("Format not recognized");
-			exit();
+			exit(1);
 	}
 	
 }
@@ -510,19 +518,20 @@ char * progScanner(FILE *inputFile, char * instruction){
 
 main(int argc, char* argv[]){
 	//instantiate the Mem's
-	iMem = malloc(512*sizeof(struct int)); //1 instruction takes up 1 word, so iMem is an array of 512 instructions
-	dMem = malloc(512*sizeof(int)); //Data memory is stored as words since that is the smallest unit we will be using here
+	//iMem = malloc(512*sizeof(struct inst)); //1 instruction takes up 1 word, so iMem is an array of 512 instructions
+	iMem = (inst *) malloc(512*sizeof(inst));
+	dMem = (int *) malloc(512*sizeof(int)); //Data memory is stored as words since that is the smallest unit we will be using here
 	int i;
 	for(i=0; i < 512; i++){
 		dMem[i] = 0;
 	}
 	
-	
 	//instantiate the registers
-	reg = malloc(32*sizeof(int));
+	reg = (int *) malloc(32*sizeof(int));
 	for(i=0; i < 32; i++){
 		reg[i] = 0;
-	)
+	}
+	
 	//instantiates the utilization data collection variables
 	totalCycles = 0;
 	IFcycles = 0;
@@ -534,18 +543,18 @@ main(int argc, char* argv[]){
 	//instantiates general function variables
 	pc = 0;
 	halt = 1;
-	tempInst = {0, 0, 0, 0, 0};
-	tempLatch = {tempInst, 0, 0, 0, 0, 0};
+	tempInst = (inst) {0, 0, 0, 0, 0};
+	tempLatch = (latch) {tempInst, 0, 0, 0, 0, 0};
 	IF_ID = tempLatch;
 	ID_EX = tempLatch;
 	EX_MEM = tempLatch;
 	MEM_WB = tempLatch;
 	
 	//Parse inputs to get file name, Mem time c, Multiply time m, EX op time n
-	string inputFileName = argv[argc-5];
+	char * inputFileName = argv[argc-5];
 	c = atoi(argv[argc-4]);
 	m = atoi(argv[argc-3]);
-	n = atoi(argv[argc-2)];
+	n = atoi(argv[argc-2]);
 	simMode = atoi(argv[argc-1]);	//0 for single cycle, 1 for batch
 	IFdelay = c;
 	EXdelay = 0;
@@ -560,8 +569,8 @@ main(int argc, char* argv[]){
 	
 	
 	//Instruction Parsing block
-	char * instruction = malloc(100*sizeof(char);
-	string fullInput = strcat("./", inputFileName);
+	char * instruction = (char *) malloc(100*sizeof(char));
+	char * fullInput = strcat("./", inputFileName);
 	FILE * inputFile = fopen(fullInput, "r");
 	do{
 		instruction = progScanner(inputFile, instruction);
@@ -573,7 +582,7 @@ main(int argc, char* argv[]){
 	fclose(inputFile);
 	
 	//Reset tempInst so it can be used to clear latches
-	tempInst = {0, 0, 0, 0, 0};
+	tempInst = (inst) {0, 0, 0, 0, 0};
 	
 	pc = 0; //reset pc to 0
 	
