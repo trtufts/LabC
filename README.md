@@ -8,3 +8,7 @@ Gabriela Correa
 
 Assignment Description:
 http://ece353.ecs.umass.edu/lab2/labC.pdf
+
+Takes inputs as:
+
+LabC inputFile c m n simMode
