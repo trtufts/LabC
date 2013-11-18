@@ -359,38 +359,142 @@ void WB(){
 	}
 }
 
+int getRegNumber(char * inputReg){
+	if((strcmp(inputReg,"zero")==0)||(strcmp(inputReg,"0")){
+		return 0;
+	}else if((strcmp(inputReg,"at")==0)||(strcmp(inputReg,"1")){
+		return 1;
+	}else if((strcmp(inputReg,"v0")==0)||(strcmp(inputReg,"2")){
+		return 2;
+	}else if((strcmp(inputReg,"v1")==0)||(strcmp(inputReg,"3")){
+		return 3;
+	}else if((strcmp(inputReg,"a0")==0)||(strcmp(inputReg,"4")){
+		return 4;
+	}else if((strcmp(inputReg,"a1")==0)||(strcmp(inputReg,"5")){
+		return 5;
+	}else if((strcmp(inputReg,"a2")==0)||(strcmp(inputReg,"6")){
+		return 6;
+	}else if((strcmp(inputReg,"a3")==0)||(strcmp(inputReg,"7")){
+		return 7;
+	}else if((strcmp(inputReg,"t0")==0)||(strcmp(inputReg,"8")){
+		return 8;
+	}else if((strcmp(inputReg,"t1")==0)||(strcmp(inputReg,"9")){
+		return 9;
+	}else if((strcmp(inputReg,"t2")==0)||(strcmp(inputReg,"10")){
+		return 10;
+	}else if((strcmp(inputReg,"t3")==0)||(strcmp(inputReg,"11")){
+		return 11;
+	}else if((strcmp(inputReg,"t4")==0)||(strcmp(inputReg,"12")){
+		return 12;
+	}else if((strcmp(inputReg,"t5")==0)||(strcmp(inputReg,"13")){
+		return 13;
+	}else if((strcmp(inputReg,"t6")==0)||(strcmp(inputReg,"14")){
+		return 14;
+	}else if((strcmp(inputReg,"t7")==0)||(strcmp(inputReg,"15")){
+		return 15;
+	}else if((strcmp(inputReg,"s0")==0)||(strcmp(inputReg,"16")){
+		return 16;
+	}else if((strcmp(inputReg,"s1")==0)||(strcmp(inputReg,"17")){
+		return 17;
+	}else if((strcmp(inputReg,"s2")==0)||(strcmp(inputReg,"18")){
+		return 18;
+	}else if((strcmp(inputReg,"s3")==0)||(strcmp(inputReg,"19")){
+		return 19;
+	}else if((strcmp(inputReg,"s4")==0)||(strcmp(inputReg,"20")){
+		return 20;
+	}else if((strcmp(inputReg,"s5")==0)||(strcmp(inputReg,"21")){
+		return 21;
+	}else if((strcmp(inputReg,"s6")==0)||(strcmp(inputReg,"22")){
+		return 22;
+	}else if((strcmp(inputReg,"s7")==0)||(strcmp(inputReg,"23")){
+		return 23;
+	}else if((strcmp(inputReg,"t8")==0)||(strcmp(inputReg,"24")){
+		return 24;
+	}else if((strcmp(inputReg,"t9")==0)||(strcmp(inputReg,"25")){
+		return 25;
+	}else if((strcmp(inputReg,"k0")==0)||(strcmp(inputReg,"26")){
+		return 26;
+	}else if((strcmp(inputReg,"k1")==0)||(strcmp(inputReg,"27")){
+		return 27;
+	}else if((strcmp(inputReg,"gp")==0)||(strcmp(inputReg,"28")){
+		return 28;
+	}else if((strcmp(inputReg,"sp")==0)||(strcmp(inputReg,"29")){
+		return 29;
+	}else if((strcmp(inputReg,"fp")==0)||(strcmp(inputReg,"30")){
+		return 30;
+	}else if((strcmp(inputReg,"ra")==0)||(strcmp(inputReg,"31")){
+		return 31;
+	}else if(atoi(inputReg)>31){
+		printf("Register out of bounds, %d is higher than 31", atoi(inputReg));
+		exit();
+	}else {
+		printf("Register not recognized, %s is not a valid register", inputReg);
+		exit();
+	}
+}
+
 //Needs to pick R or I type, and parse stuff into numbers for iMem
 struct inst parser(char * instruction){
 	int i;
-	char delimiters[]=", ";  // Define delimiters for the strtok functions
-	char ** instructionFields; //Define the resulting instruction fields
-	char format;
+	char delimiters[]="$, ";  								//Define delimiters for the strtok functions
+	char ** instructionFields; 								//Define the resulting instruction fields
+	struct inst parsedInst = {0, 0, 0, 0, 0};
+	int format;												//0 for R type, 1 for I type, 2 for halt
 
 	//parse first field to find opcode
-	*instructionFields = malloc(6*sizeof(char*));
+	for(i=0; i < 4; i++){
+		*(instructionFields+i) = malloc(20*sizeof(char *));
+	}
 	instructionFields[0] = strtok(instruction, delimiters);
-	//add, sub, mul are R type
-	//addi, lw, sw, beq are I type
-	//make format R or I
-	
-	if(format == 'R'){
-		for (i=1; i<4; i++)
-			*(instructionFields+i) = malloc(20*sizeof(char *));
-	}
-	else if(format == 'I'){
-	}
-	else{
-	
-	}
-
-	printf("inputString[]=%s\n", inputString);
-	instructionFields[0] = strtok(inputString, delimiters);
-	printf("inputString[]=%s\n", inputString);
 	instructionFields[1] = strtok(NULL, delimiters);
-	printf("inputString[]=%s\n", inputString);
 	instructionFields[2] = strtok(NULL, delimiters);
-	printf("inputString[]=%s\n", inputString);
-	printf("%s \n%s \n%s \n", instructionFields[0], instructionFields[1], instructionFields[2]);
+	instructionFields[3] = strtok(NULL, delimiters);	
+	
+	if(strcmp(instructionFields[0],"add")==0){					//Compares the first field against the valid opcodes to get type and store the appropriate number
+		format = 0;
+		parsedInst.op = 0;
+	}else if(strcmp(instructionFields[0],"addi")==0){
+		format = 1;
+		parsedInst.op = 1;
+	}else if(strcmp(instructionFields[0],"sub")==0){
+		format = 0;
+		parsedInst.op = 2;
+	}else if(strcmp(instructionFields[0],"mul")==0){
+		format = 0;
+		parsedInst.op = 3;
+	}else if(strcmp(instructionFields[0],"beq")==0){
+		format = 1;
+		parsedInst.op = 4;
+	}else if(strcmp(instructionFields[0],"lw")==0){
+		format = 1;
+		parsedInst.op = 5;
+	}else if(strcmp(instructionFields[0],"sw")==0){
+		format = 1;
+		parsedInst.op = 6;
+	}else if(strcmp(instructionFields[0],"haltSimulation")==0){
+		format = 2;
+		parsedInst.op = 7;
+	}else{
+		printf("Op code not recognized: Parser");
+		exit();
+	}
+	
+	switch(format){
+		case 0:
+			parsedInst.d = getRegNumber(instructionFields[1]);
+			parsedInst.s1 = getRegNumber(instructionFields[2]);
+			parsedInst.s2 = getRegNumber(instructionFields[3]);
+		case 1:
+			parsedInst.s1 = getRegNumber(instructionFields[1]);
+			parsedInst.s2 = getRegNumber(instructionFields[2]);
+			parsedInst.im = atoi(instructionFields[3]);
+		case 2:
+			return;
+		default:
+			printf("Format not recognized");
+			exit();
+	}
+	
 }
 
 //should be functional
@@ -416,8 +520,9 @@ main(int argc, char* argv[]){
 	
 	//instantiate the registers
 	reg = malloc(32*sizeof(int));
-	reg[0] = 0;
-
+	for(i=0; i < 32; i++){
+		reg[i] = 0;
+	)
 	//instantiates the utilization data collection variables
 	totalCycles = 0;
 	IFcycles = 0;
@@ -441,7 +546,7 @@ main(int argc, char* argv[]){
 	c = atoi(argv[argc-4]);
 	m = atoi(argv[argc-3]);
 	n = atoi(argv[argc-2)];
-	simMode = atoi(argv[argc-1]);
+	simMode = atoi(argv[argc-1]);	//0 for single cycle, 1 for batch
 	IFdelay = c;
 	EXdelay = 0;
 	MEMdelay = c;
@@ -479,8 +584,19 @@ main(int argc, char* argv[]){
 		ID();
 		IF();
 		totalCycles++;
-		
+		if(simMode == 1){
+			for(i=1;i<32;i++){
+				printf("Register %d contains %d \n", i, reg[i]);
+			}
+			printf("PC is %d \n", pc);
+			getchar();
+		}
 	}
-	
+	printf("Total Cycles: %d \n", totalCycles);
+	printf("IF Utilization: %d \n", IFcycles/totalCycles);
+	printf("ID Utilization: %d \n", IDcycles/totalCycles);
+	printf("EX Utilization: %d \n", EXcycles/totalCycles);
+	printf("MEM Utilization: %d \n", MEMcycles/totalCycles);
+	printf("WB Utilization: %d \n", WBcycles/totalCycles);
 	
 }
