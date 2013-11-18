@@ -133,7 +133,7 @@ void IDpush(){											//These 5 lines were repeated enough to warrant a new f
 }
 
 void ID(){
-	if(ID_EX.pipedInst == 7){							//If halt has passed through here, it just auto returns
+	if(ID_EX.pipedInst.op == 7){						//If halt has passed through here, it just auto returns
 		return;
 	}
 	if((IF_ID.validItem == 1)&&(ID_EX.validItem == 0)){	//If both latches are ready go to the instruction switch statements
@@ -197,7 +197,7 @@ void ID(){
 				//ID_EX.pipedInst = IF_ID.pipedInst;		//Push the halt instruction down the pipe
 				//ID_EX.instPC = IF_ID.instPC;			//Push the pc for good measure
 				//ID_EX.validItem = 1;					//Mark the latch as ready for consumption so the halt propagates
-				EXdelay = 1;							//Set the EXdelay to be 1 for fast propagation
+				EXdelay = 0;							//Set the EXdelay to be 1 for fast propagation
 				return;									//Return so we don't count as useful work or clear the latch
 				
 			default:
@@ -211,8 +211,50 @@ void ID(){
 	}
 }
 
-void EX(int n, int m){
-//n cycles or m cycles for multiply
+void EX(){
+	if(EX_MEM.pipedInst.op == 7){						//If halt has passed through here, it just auto returns
+		return;
+	}
+	else if((ID_EX.validItem == 1){						//Check previous latch to see if it can start it's operation
+		if((EXdelay == 0)&&(EX_MEM.validItem == 0)){ 	//Once the delay count down is finished and the latch is ready to receive, compute and push
+			EX_MEM = ID_EX;
+			switch(ID_EX.pipedInst.op){
+				case 0:									//add
+					EX_MEM.EXresult = ID_EX.operA + ID_EX.operB;
+					break;
+				case 2:									//sub
+					EX_MEM.EXresult = ID_EX.operA - ID_EX.operB;
+					break;
+				case 3:									//mul
+					EX_MEM.EXresult = ID_EX.operA * ID_EX.operB;	//Assumes that the system is operating at 32 bits so the result will be cast down to the right size
+					break;
+				case 4:
+					if(ID_EX.operA == ID_EX.operB){
+						pc = ID_EX.pipedInst.im + ID_EX.instPC + 1;	//Advances pc by the immediate value past the pc of the next instruction
+					}
+					branchPending = 2;					//Set to 2 so the IF stage knows not to unfreeze until the next cycle
+					break;
+				case 1:									//addi
+				case 5:									//lw
+				case 6:									//sw
+					EX_MEM.EXresult = ID_EX.operA + ID_EX.pipedInst.im;	//Note these three all do the same thing in EX, the results are just handled differently
+					break;
+	
+				case 7:
+					return;
+				default:
+					print("Op Code not recognized: EX stage");
+					exit();
+			}
+			ID_EX = tempLatch;
+			EXcycles ++;
+		}
+		else if(EXdelay != 0){							//Note this is set by the previous stage, so it will never be changed until this stage clears the latch
+			EXdelay -= 1;								//Counts down the delay for the EX stage
+			EXcycles ++;
+			assert(EXdelay > -1); 						//Catch if this decreases too much
+		}
+	}
 }
 
 void MEM(){
@@ -227,7 +269,7 @@ void MEM(){
 				//MEM_WB.pipedInst = EX_MEM.pipedInst;		//Push the instruction down the pipe
 				//MEM_WB.instPC = EX_MEM.instPC;				//None of these need the MEM stage so they pass through in one cycle
 				//MEM_WB.validItem = 1;						//
-				break;
+				return;
 				
 			case 5:											//lw
 				if(MEMdelay == 0){							//Once the delay count down is finished push to the latch
@@ -243,13 +285,16 @@ void MEM(){
 					//MEM_WB.validItem = 1;
 					
 					MEMdelay = c;							//Resets delay for the next instruction
+					EX_MEM = tempLatch;
+					MEMcycles ++;
 				}
 				else{
 					MEMdelay -= 1;							//Counts down the delay for the MEM stage
+					MEMcycles ++;
 					assert(MEMdelay > -1); 					//Catch if this decreases too much
 				}
+				return;
 				
-				break;
 			case 6:											//sw
 				if(MEMdelay == 0){							//Once the delay count down is finished push to the latch
 					MEM_WB = EX_MEM;
@@ -264,13 +309,16 @@ void MEM(){
 					//MEM_WB.validItem = 1;
 					
 					MEMdelay = c;							//Resets delay for the next instruction
+					EX_MEM = tempLatch;
+					MEMcycles ++;
 				}
 				else{
 					MEMdelay -= 1;							//Counts down the delay for the MEM stage
+					MEMcycles ++;
 					assert(MEMdelay > -1); 					//Catch if this decreases too much
 				}
 								
-				break;										
+				return;										
 			
 			case 7:											//halt
 				MEM_WB.pipedInst = EX_MEM.pipedInst;		//Push the halt instruction down the pipe
@@ -281,12 +329,9 @@ void MEM(){
 				printf("Op code not recognized: WB stage");
 				exit();										//Catches errors in op codes
 		}
-		EM_MEM = tempLatch;
-		MEMcycles ++;
 	}
 }
 
-//might need to change sw and beq if they don't count as useful cycles
 void WB(){
 	if(MEM_WB.validItem == 1){
 		switch(MEM_WB.pipedInst.op){
@@ -303,13 +348,11 @@ void WB(){
 			
 			case 4:											//beq
 			case 6:											//sw
-				break;										//Does nothing
-			
 			case 7:											//halt
-				return;
+				return;										//These instructions don't count as cycles for WB
 			default:
 				printf("Op code not recognized: WB stage");
-				exit();						//Catches errors in op codes
+				exit();										//Catches errors in op codes
 		}
 		MEM_WB = tempLatch;
 		WBcycles ++;
