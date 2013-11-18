@@ -8,8 +8,8 @@
 typedef struct{
 	int op;												//Op reference: 0 = add, 1 = add1, 2 = sub, 3 = mul, 4 = beq, 5 = lw, 6 = sw, 7 = halt
 	int d;
-	int s1;
-	int s2;
+	int s1;												//rs
+	int s2;												//rt
 	int im;
 } inst;
 
@@ -40,6 +40,7 @@ int EXcycles;
 int MEMcycles;
 int WBcycles;
 int pc;													//lowercase pc for the main pc, instPC for values sent down the pipe, for clarity
+int haltpc;												//stores the pc of the halt instruction, used to stop beq from escaping the instruction set
 int branchPending; 										//1 when there is a branch pending, 0 otherwise
 int IFdelay; 											//Used to simulate long stages
 int EXdelay;
@@ -51,7 +52,7 @@ int halt;												//1 when the program should be halting, 0 otherwise
 int simMode;
 
 void IF(){
-	if(IF_ID.pipedInst.op == 7){							//If halt has passed through here, it just auto returns
+	if(IF_ID.pipedInst.op == 7){						//If halt has passed through here, it just auto returns
 		return;
 	}
 	if((IF_ID.validItem == 0)&&(branchPending == 0)){	//If the latch is ready and there is no branch pending, IF acts
@@ -60,22 +61,26 @@ void IF(){
 			IF_ID.instPC = pc;							//Store the pc with the instruction in the latch
 			IF_ID.validItem = 1;						//Mark the latch as ready for consumption
 		}
-		else if(IFdelay == 0){								//Once the delay count down is finished push to the latch
+		else if(IFdelay == 1){							//Once the delay count down is finished push to the latch, note that we count this action as the last cycle, so we do the action at delay = 1. This is the same for all other delays in the code
 			IF_ID.pipedInst = iMem[pc];					//Push the instruction into the pipe
 			IF_ID.instPC = pc;							//Store the pc with the instruction in the latch
 			IF_ID.validItem = 1;						//Mark the latch as ready for consumption
 			
 			pc ++;										//Increment the pc for the next instruction (note we go by one because iMem is indexed by instruction not bits)
+			if(pc > haltpc){
+				pc = haltpc;							//if the pc goes out of bounds, it sets it back to the halt instruction
+			}
 			IFcycles ++;								//This is a useful cycle for the IF stage
 			IFdelay = c;								//Resets delay for the next instruction
 		}
 		else{
 			IFdelay -= 1;								//Counts down the delay for the IF stage
 			IFcycles ++;								//This is a useful cycle for the IF stage
-			assert(IFdelay > -1); 						//Catch if this decreases too much
+			assert(IFdelay > 0); 						//Catch if this decreases too much
 		}
+	}else if(branchPending == 2){
+		branchPending = 0;
 	}
-	//if branch pending = 2 set to 0, EX should set to 2 instead of 0 so it fetches the cycle AFTER it gets resolved
 }
 
 int regCheck(int sReg){								//sReg is the register number that is being checked
@@ -189,7 +194,7 @@ void ID(){
 				
 			case 7:										//halt
 				ID_EX = IF_ID;
-				EXdelay = 0;							//Set the EXdelay to be 1 for fast propagation
+				EXdelay = 1;							//Set the EXdelay to be 1 for fast propagation
 				return;									//Return so we don't count as useful work or clear the latch
 				
 			default:
@@ -208,7 +213,7 @@ void EX(){
 		return;
 	}
 	else if(ID_EX.validItem == 1){						//Check previous latch to see if it can start it's operation
-		if((EXdelay == 0)&&(EX_MEM.validItem == 0)){ 	//Once the delay count down is finished and the latch is ready to receive, compute and push
+		if((EXdelay == 1)&&(EX_MEM.validItem == 0)){ 	//Once the delay count down is finished and the latch is ready to receive, compute and push
 			EX_MEM = ID_EX;
 			switch(ID_EX.pipedInst.op){
 				case 0:									//add
@@ -241,10 +246,10 @@ void EX(){
 			ID_EX = tempLatch;
 			EXcycles ++;
 		}
-		else if(EXdelay != 0){							//Note this is set by the previous stage, so it will never be changed until this stage clears the latch
+		else if(EXdelay != 1){							//Note this is set by the previous stage, so it will never be changed until this stage clears the latch
 			EXdelay -= 1;								//Counts down the delay for the EX stage
 			EXcycles ++;
-			assert(EXdelay > -1); 						//Catch if this decreases too much
+			assert(EXdelay > -0); 						//Catch if this decreases too much
 		}
 	}
 }
@@ -258,10 +263,11 @@ void MEM(){
 			case 3:											//mul
 			case 4:											//beq
 				MEM_WB = EX_MEM;
+				EX_MEM = tempLatch;
 				return;
 				
 			case 5:											//lw
-				if(MEMdelay == 0){							//Once the delay count down is finished push to the latch
+				if(MEMdelay == 1){							//Once the delay count down is finished push to the latch
 					MEM_WB = EX_MEM;
 					if(EX_MEM.EXresult % 4 != 0){			//Makes sure the memory alignment is correct
 						printf("Data Alignment Error, %d not divisible by 4 \n", EX_MEM.EXresult);
@@ -276,12 +282,12 @@ void MEM(){
 				else{
 					MEMdelay -= 1;							//Counts down the delay for the MEM stage
 					MEMcycles ++;
-					assert(MEMdelay > -1); 					//Catch if this decreases too much
+					assert(MEMdelay > 0); 					//Catch if this decreases too much
 				}
 				return;
 				
 			case 6:											//sw
-				if(MEMdelay == 0){							//Once the delay count down is finished push to the latch
+				if(MEMdelay == 1){							//Once the delay count down is finished push to the latch
 					MEM_WB = EX_MEM;
 					if(EX_MEM.EXresult % 4 != 0){			//Makes sure the memory alignment is correct
 						printf("Data Alignment Error, %d not divisible by 4 \n", EX_MEM.EXresult);
@@ -296,7 +302,7 @@ void MEM(){
 				else{
 					MEMdelay -= 1;							//Counts down the delay for the MEM stage
 					MEMcycles ++;
-					assert(MEMdelay > -1); 					//Catch if this decreases too much
+					assert(MEMdelay > 0); 					//Catch if this decreases too much
 				}
 								
 				return;										
@@ -330,6 +336,7 @@ void WB(){
 			case 4:											//beq
 			case 6:											//sw
 			case 7:											//halt
+				MEM_WB = tempLatch;
 				return;										//These instructions don't count as cycles for WB
 			default:
 				printf("Op code not recognized: WB stage \n");
@@ -341,69 +348,69 @@ void WB(){
 }
 
 int getRegNumber(char * inputReg){
-	if((strcmp(inputReg,"zero")==0)||(strcmp(inputReg,"0"))){
+	if((strcmp(inputReg,"zero")==0)||(strcmp(inputReg,"0")==0)){
 		return 0;
-	}else if((strcmp(inputReg,"at")==0)||(strcmp(inputReg,"1"))){
+	}else if((strcmp(inputReg,"at")==0)||(strcmp(inputReg,"1")==0)){
 		return 1;
-	}else if((strcmp(inputReg,"v0")==0)||(strcmp(inputReg,"2"))){
+	}else if((strcmp(inputReg,"v0")==0)||(strcmp(inputReg,"2")==0)){
 		return 2;
-	}else if((strcmp(inputReg,"v1")==0)||(strcmp(inputReg,"3"))){
+	}else if((strcmp(inputReg,"v1")==0)||(strcmp(inputReg,"3")==0)){
 		return 3;
-	}else if((strcmp(inputReg,"a0")==0)||(strcmp(inputReg,"4"))){
+	}else if((strcmp(inputReg,"a0")==0)||(strcmp(inputReg,"4")==0)){
 		return 4;
-	}else if((strcmp(inputReg,"a1")==0)||(strcmp(inputReg,"5"))){
+	}else if((strcmp(inputReg,"a1")==0)||(strcmp(inputReg,"5")==0)){
 		return 5;
-	}else if((strcmp(inputReg,"a2")==0)||(strcmp(inputReg,"6"))){
+	}else if((strcmp(inputReg,"a2")==0)||(strcmp(inputReg,"6")==0)){
 		return 6;
-	}else if((strcmp(inputReg,"a3")==0)||(strcmp(inputReg,"7"))){
+	}else if((strcmp(inputReg,"a3")==0)||(strcmp(inputReg,"7")==0)){
 		return 7;
-	}else if((strcmp(inputReg,"t0")==0)||(strcmp(inputReg,"8"))){
+	}else if((strcmp(inputReg,"t0")==0)||(strcmp(inputReg,"8")==0)){
 		return 8;
-	}else if((strcmp(inputReg,"t1")==0)||(strcmp(inputReg,"9"))){
+	}else if((strcmp(inputReg,"t1")==0)||(strcmp(inputReg,"9")==0)){
 		return 9;
-	}else if((strcmp(inputReg,"t2")==0)||(strcmp(inputReg,"10"))){
+	}else if((strcmp(inputReg,"t2")==0)||(strcmp(inputReg,"10")==0)){
 		return 10;
-	}else if((strcmp(inputReg,"t3")==0)||(strcmp(inputReg,"11"))){
+	}else if((strcmp(inputReg,"t3")==0)||(strcmp(inputReg,"11")==0)){
 		return 11;
-	}else if((strcmp(inputReg,"t4")==0)||(strcmp(inputReg,"12"))){
+	}else if((strcmp(inputReg,"t4")==0)||(strcmp(inputReg,"12")==0)){
 		return 12;
-	}else if((strcmp(inputReg,"t5")==0)||(strcmp(inputReg,"13"))){
+	}else if((strcmp(inputReg,"t5")==0)||(strcmp(inputReg,"13")==0)){
 		return 13;
-	}else if((strcmp(inputReg,"t6")==0)||(strcmp(inputReg,"14"))){
+	}else if((strcmp(inputReg,"t6")==0)||(strcmp(inputReg,"14")==0)){
 		return 14;
-	}else if((strcmp(inputReg,"t7")==0)||(strcmp(inputReg,"15"))){
+	}else if((strcmp(inputReg,"t7")==0)||(strcmp(inputReg,"15")==0)){
 		return 15;
-	}else if((strcmp(inputReg,"s0")==0)||(strcmp(inputReg,"16"))){
+	}else if((strcmp(inputReg,"s0")==0)||(strcmp(inputReg,"16")==0)){
 		return 16;
-	}else if((strcmp(inputReg,"s1")==0)||(strcmp(inputReg,"17"))){
+	}else if((strcmp(inputReg,"s1")==0)||(strcmp(inputReg,"17")==0)){
 		return 17;
-	}else if((strcmp(inputReg,"s2")==0)||(strcmp(inputReg,"18"))){
+	}else if((strcmp(inputReg,"s2")==0)||(strcmp(inputReg,"18")==0)){
 		return 18;
-	}else if((strcmp(inputReg,"s3")==0)||(strcmp(inputReg,"19"))){
+	}else if((strcmp(inputReg,"s3")==0)||(strcmp(inputReg,"19")==0)){
 		return 19;
-	}else if((strcmp(inputReg,"s4")==0)||(strcmp(inputReg,"20"))){
+	}else if((strcmp(inputReg,"s4")==0)||(strcmp(inputReg,"20")==0)){
 		return 20;
-	}else if((strcmp(inputReg,"s5")==0)||(strcmp(inputReg,"21"))){
+	}else if((strcmp(inputReg,"s5")==0)||(strcmp(inputReg,"21")==0)){
 		return 21;
-	}else if((strcmp(inputReg,"s6")==0)||(strcmp(inputReg,"22"))){
+	}else if((strcmp(inputReg,"s6")==0)||(strcmp(inputReg,"22")==0)){
 		return 22;
-	}else if((strcmp(inputReg,"s7")==0)||(strcmp(inputReg,"23"))){
+	}else if((strcmp(inputReg,"s7")==0)||(strcmp(inputReg,"23")==0)){
 		return 23;
-	}else if((strcmp(inputReg,"t8")==0)||(strcmp(inputReg,"24"))){
+	}else if((strcmp(inputReg,"t8")==0)||(strcmp(inputReg,"24")==0)){
 		return 24;
-	}else if((strcmp(inputReg,"t9")==0)||(strcmp(inputReg,"25"))){
+	}else if((strcmp(inputReg,"t9")==0)||(strcmp(inputReg,"25")==0)){
 		return 25;
-	}else if((strcmp(inputReg,"k0")==0)||(strcmp(inputReg,"26"))){
+	}else if((strcmp(inputReg,"k0")==0)||(strcmp(inputReg,"26")==0)){
 		return 26;
-	}else if((strcmp(inputReg,"k1")==0)||(strcmp(inputReg,"27"))){
+	}else if((strcmp(inputReg,"k1")==0)||(strcmp(inputReg,"27")==0)){
 		return 27;
-	}else if((strcmp(inputReg,"gp")==0)||(strcmp(inputReg,"28"))){
+	}else if((strcmp(inputReg,"gp")==0)||(strcmp(inputReg,"28")==0)){
 		return 28;
-	}else if((strcmp(inputReg,"sp")==0)||(strcmp(inputReg,"29"))){
+	}else if((strcmp(inputReg,"sp")==0)||(strcmp(inputReg,"29")==0)){
 		return 29;
-	}else if((strcmp(inputReg,"fp")==0)||(strcmp(inputReg,"30"))){
+	}else if((strcmp(inputReg,"fp")==0)||(strcmp(inputReg,"30")==0)){
 		return 30;
-	}else if((strcmp(inputReg,"ra")==0)||(strcmp(inputReg,"31"))){
+	}else if((strcmp(inputReg,"ra")==0)||(strcmp(inputReg,"31")==0)){
 		return 31;
 	}else if(atoi(inputReg)>31){
 		printf("Register out of bounds, %d is higher than 31 \n", atoi(inputReg));
@@ -414,15 +421,12 @@ int getRegNumber(char * inputReg){
 	}
 }
 
-//Needs to pick R or I type, and parse stuff into numbers for iMem
-//struct inst parser(char * instruction){
 inst parser(char * instruction){
 	int i;
-	char delimiters[]="$, \n";  								//Define delimiters for the strtok functions
+	char delimiters[]="$, \n()";  								//Define delimiters for the strtok functions
 	char ** instructionFields; 								//Define the resulting instruction fields
-	//struct inst parsedInst = {0, 0, 0, 0, 0};
 	inst parsedInst = {0, 0, 0, 0, 0};
-	int format;												//0 for R type, 1 for I type, 2 for halt
+	int format;												//0 for R type, 1 for I type, 2 for lw/sw, 3 for halt
 
 	//parse first field to find opcode
 	for(i=0; i < 4; i++){
@@ -449,13 +453,13 @@ inst parser(char * instruction){
 		format = 1;
 		parsedInst.op = 4;
 	}else if(strcmp(instructionFields[0],"lw")==0){
-		format = 1;
+		format = 2;
 		parsedInst.op = 5;
 	}else if(strcmp(instructionFields[0],"sw")==0){
-		format = 1;
+		format = 2;
 		parsedInst.op = 6;
 	}else if(strcmp(instructionFields[0],"haltSimulation")==0){
-		format = 2;
+		format = 3;
 		parsedInst.op = 7;
 	}else{
 		printf("Op code %s not recognized: Parser \n", instructionFields[0]);
@@ -467,17 +471,25 @@ inst parser(char * instruction){
 			parsedInst.d = getRegNumber(instructionFields[1]);
 			parsedInst.s1 = getRegNumber(instructionFields[2]);
 			parsedInst.s2 = getRegNumber(instructionFields[3]);
+			return parsedInst;
 		case 1:
-			parsedInst.s1 = getRegNumber(instructionFields[1]);
-			parsedInst.s2 = getRegNumber(instructionFields[2]);
+			parsedInst.s2 = getRegNumber(instructionFields[1]);
+			parsedInst.s1 = getRegNumber(instructionFields[2]);
 			parsedInst.im = atoi(instructionFields[3]);
+			return parsedInst;
 		case 2:
+			parsedInst.s2 = getRegNumber(instructionFields[1]);
+			parsedInst.s1 = getRegNumber(instructionFields[3]);
+			parsedInst.im = atoi(instructionFields[2]);
+			return parsedInst;
+		case 3:
 			return parsedInst;
 		default:
 			printf("Format not recognized \n");
 			exit(1);
 	}
 	
+	free(instructionFields);
 }
 
 //should be functional
@@ -533,7 +545,7 @@ int main(int argc, char* argv[]){
 	n = atoi(argv[argc-2]);
 	simMode = atoi(argv[argc-1]);	//0 for single cycle, 1 for batch
 	IFdelay = c;
-	EXdelay = 0;
+	EXdelay = 1;
 	MEMdelay = c;
 	
 	
@@ -555,6 +567,7 @@ int main(int argc, char* argv[]){
 		tempInst = parser(instruction);
 		iMem[pc] = tempInst;
 		pc += 1;
+		haltpc = pc-1;	//assigns for every pc, the last assignment will be the halt code
 		assert(pc < 512); //Only 512 instructions fit in the memory
 	} while(tempInst.op != 7);
 	fclose(inputFile);
@@ -580,10 +593,15 @@ int main(int argc, char* argv[]){
 		}
 	}
 	printf("Total Cycles: %d \n", totalCycles);
-	printf("IF Utilization: %d \n", IFcycles/totalCycles);
-	printf("ID Utilization: %d \n", IDcycles/totalCycles);
-	printf("EX Utilization: %d \n", EXcycles/totalCycles);
-	printf("MEM Utilization: %d \n", MEMcycles/totalCycles);
-	printf("WB Utilization: %d \n", WBcycles/totalCycles);
+	printf("IF Utilization: %d\% \n", ((IFcycles * 100)/totalCycles));
+	printf("ID Utilization: %d\% \n", ((IDcycles * 100)/totalCycles));
+	printf("EX Utilization: %d\% \n", ((EXcycles * 100)/totalCycles));
+	printf("MEM Utilization: %d\% \n", ((MEMcycles * 100)/totalCycles));
+	printf("WB Utilization: %d\% \n", ((WBcycles * 100)/totalCycles));
+	
+	for(i=1;i<32;i++){
+		printf("Register %d contains %d \n", i, reg[i]);
+	}
+	printf("PC is %d \n", pc);
 	
 }
